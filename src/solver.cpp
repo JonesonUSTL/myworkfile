@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <numeric>
 #include <stdexcept>
 #include <unordered_map>
@@ -1025,10 +1026,15 @@ Result solveNonlinear(const Model& model) {
   double dLambda = model.step.totalLoadFactor / std::max(1, model.step.increments);
   double arcRadius = model.step.arcLengthRadius;
   int cutbackCount = 0;
+  int incId = 0;
   while (lambdaPrev < model.step.totalLoadFactor - 1e-14) {
+    ++incId;
     double lambdaRaw = std::min(model.step.totalLoadFactor, lambdaPrev + dLambda);
     double lambda = amplitudeFactor(model, lambdaRaw);
     auto target = buildExternalLoad(model, lambda);
+
+    std::cout << "[Nonlinear] Increment " << incId << ": lambdaRaw=" << lambdaRaw << ", lambda=" << lambda
+              << ", dLambda=" << dLambda << "\n";
 
     bool converged = false;
     std::vector<double> uTrial = u;
@@ -1043,7 +1049,9 @@ Result solveNonlinear(const Model& model) {
       double norm = 0.0;
       for (int i = 0; i < ndof; ++i)
         if (!fixed[i]) norm += res[i] * res[i];
-      if (std::sqrt(norm) < model.step.tolerance) {
+      const double resNorm = std::sqrt(norm);
+      std::cout << "[Nonlinear]   Iter " << (it + 1) << ": residual_norm=" << resNorm << "\n";
+      if (resNorm < model.step.tolerance) {
         converged = true;
         if (model.step.useArcLength) {
           if (it <= 4) arcRadius = std::min(model.step.arcLengthMaxRadius, arcRadius * model.step.arcLengthGrowFactor);
@@ -1059,6 +1067,7 @@ Result solveNonlinear(const Model& model) {
       regularize(Kmod);
       auto du = solveWithMpcLagrange(model, Kmod, res, &uTrial);
       double duNorm = std::sqrt(dotVec(du, du));
+      std::cout << "[Nonlinear]   Iter " << (it + 1) << ": du_norm=" << duNorm << "\n";
       if (model.step.useArcLength) {
         double ratio = arcRadius / (duNorm + 1e-12);
         dLamAcc += std::clamp(dLambda * ratio, -1.5 * std::abs(dLambda), 1.5 * std::abs(dLambda));
@@ -1070,10 +1079,13 @@ Result solveNonlinear(const Model& model) {
       u = uTrial;
       lambdaPrev = lambdaRaw;
       cutbackCount = 0;
+      std::cout << "[Nonlinear] Increment " << incId << " converged.\n";
     } else {
       dLambda *= model.step.useArcLength ? model.step.arcLengthShrinkFactor : 0.5;
       arcRadius = std::max(model.step.arcLengthMinRadius, arcRadius * model.step.arcLengthShrinkFactor);
       ++cutbackCount;
+      std::cout << "[Nonlinear] Increment " << incId << " failed, cutback_count=" << cutbackCount
+                << ", new_dLambda=" << dLambda << "\n";
       if (cutbackCount > model.step.maxCutbacks || dLambda < model.step.totalLoadFactor * 1e-6) {
         throw std::runtime_error("Newton iteration did not converge after cutbacks");
       }

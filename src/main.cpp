@@ -49,6 +49,8 @@ void printExamples() {
       "examples/classic_bar_tension.inp  # 经典单杆受拉",
       "examples/classic_beam_tip_load.inp# 经典悬臂梁端载",
       "examples/classic_solid_patch.inp  # 经典实体 patch/压缩算例",
+      "examples/solid_block_200e.inp     # 200 单元实体块（中等规模）",
+      "examples/contact_two_blocks_144e.inp # 144 单元双体接触非线性算例",
       "examples/advanced_keywords.inp    # 接触/耦合/MPC/RIKS 扩展关键字",
   };
   std::cout << "\n内置示例列表:\n";

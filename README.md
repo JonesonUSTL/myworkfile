@@ -105,6 +105,18 @@ fem_solver <input.inp> <output.vtk> [deform_scale] [solver=dense|eigen|petsc|pcg
 ./build/fem_solver --check-inp examples/advanced_keywords.inp
 ```
 
+### 5.3 复杂功能案例（百级单元 + 接触）
+
+```bash
+./build/fem_solver examples/solid_block_200e.inp output/solid_200e.vtk 1.0 dense
+./build/fem_solver examples/contact_two_blocks_144e.inp output/contact_144e.vtk 1.0 dense
+```
+
+说明：
+- `solid_block_200e.inp`：200 个 C3D8 单元，可用于中等规模性能与稳定性测试。
+- `contact_two_blocks_144e.inp`：上下块接触（含摩擦）非线性算例，会在终端打印增量/迭代残量过程。
+
+
 ---
 
 ## 6. 部署（可执行）
