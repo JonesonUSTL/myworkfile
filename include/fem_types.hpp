@@ -54,6 +54,11 @@ struct Material {
   double poisson{0.3};
   double yieldStress{250e6};
   double hardening{1.0e9};
+  double density{0.0};
+  double conductivity{0.0};
+  double specificHeat{0.0};
+  double expansion{0.0};
+  std::vector<std::pair<double, double>> plasticTable;  // (plastic_strain, stress)
 };
 
 // 位移边界条件：支持节点号或节点集名称。
@@ -96,12 +101,23 @@ struct Coupling {
   double penalty{1e10};
 };
 
-// 接触对（当前保存解析结果，后续可扩展到接触残量和切线刚度）。
+// 接触对（法向 + 摩擦罚函数参数）。
 struct ContactPair {
   std::string masterSurface;
   std::string slaveSurface;
   double penalty{1e9};
   double friction{0.3};
+};
+
+
+// 多点约束方程（MPC）：slaveDof = sum(coeff_i * masterDof_i) + offset。
+struct MpcConstraint {
+  int slaveNode{};
+  int slaveDof{};
+  std::vector<int> masterNodes;
+  std::vector<int> masterDofs;
+  std::vector<double> coefficients;
+  double offset{0.0};
 };
 
 // 输出请求（当前保存关键字，便于后续做选择性输出）。
@@ -116,6 +132,9 @@ struct Step {
   AnalysisType type{AnalysisType::LinearStatic};
   int increments{10};
   double totalLoadFactor{1.0};
+  double initialIncrement{0.1};
+  double minIncrement{1e-6};
+  double maxIncrement{0.25};
   int maxNewtonIters{30};
   double tolerance{1e-8};
   int maxLinearIters{5000};
@@ -124,10 +143,32 @@ struct Step {
   std::string amplitudeName;
   bool useArcLength{false};
   double arcLengthRadius{1e-2};
+  double arcLengthMinRadius{1e-5};
+  double arcLengthMaxRadius{5e-2};
+  double arcLengthGrowFactor{1.25};
+  double arcLengthShrinkFactor{0.5};
+  int fieldOutputFrequency{1};
+};
+
+
+
+// 热力耦合扩展接口（当前为预留数据结构，便于后续热-结构耦合实现）。
+struct TemperatureBC {
+  int nodeId{};
+  std::string nodeSetName;
+  double temperature{};
+};
+
+struct HeatLoad {
+  int nodeId{};
+  std::string nodeSetName;
+  double value{};
 };
 
 // 有限元模型容器。
 struct Model {
+  std::string modelName{"Model-1"};
+  std::vector<std::string> partNames;
   std::vector<Node> nodes;
   std::vector<Element> elements;
   std::unordered_map<std::string, Material> materials;
@@ -136,12 +177,16 @@ struct Model {
   std::unordered_map<std::string, Amplitude> amplitudes;
   std::vector<Coupling> couplings;
   std::vector<ContactPair> contacts;
+  std::vector<MpcConstraint> mpcs;
   std::vector<OutputRequest> outputRequests;
   std::vector<DofBC> bcs;
   std::vector<NodalLoad> loads;
   std::vector<BodyLoad> bodyLoads;
+  std::vector<TemperatureBC> temperatureBCs;
+  std::vector<HeatLoad> heatLoads;
   Step step;
 };
+
 
 // 计算结果容器。
 struct Result {
@@ -151,6 +196,9 @@ struct Result {
   std::vector<double> elementStrain;
   std::vector<double> elementStress;
   std::vector<double> elementVonMises;
+  std::vector<std::vector<double>> displacementFrames;
+  std::vector<std::vector<double>> reactionFrames;
+  std::vector<double> frameLoadFactors;
 };
 
 }  // namespace fem

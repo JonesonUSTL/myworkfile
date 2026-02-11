@@ -1,0 +1,76 @@
+name: cross-platform-release-build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-release:
+    name: build-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFEM_ENABLE_EIGEN=OFF -DFEM_ENABLE_PETSC=OFF -DFEM_ENABLE_OPENMP=ON
+
+      - name: Build (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: cmake --build build --config Release -j 3
+
+      - name: Smoke test (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: ./build/fem_solver examples/linear_truss.inp output/linear_macos.vtk 1.0 dense
+
+      - name: Package (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          mkdir -p dist
+          cp build/fem_solver dist/fem_solver-macos
+          tar -czf fem_solver-macos-release.tar.gz -C dist fem_solver-macos
+
+      - name: Configure (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DFEM_ENABLE_EIGEN=OFF -DFEM_ENABLE_PETSC=OFF -DFEM_ENABLE_OPENMP=ON
+
+      - name: Build (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: cmake --build build --config Release -j 3
+
+      - name: Smoke test (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: .\build\fem_solver.exe examples\linear_truss.inp output\linear_windows.vtk 1.0 dense
+
+      - name: Package (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item .\build\fem_solver.exe .\dist\fem_solver-windows.exe
+          Compress-Archive -Path .\dist\fem_solver-windows.exe -DestinationPath .\fem_solver-windows-release.zip -Force
+
+      - name: Upload artifact (macOS)
+        if: startsWith(matrix.os, 'macos')
+        uses: actions/upload-artifact@v4
+        with:
+          name: fem_solver-macos-release
+          path: fem_solver-macos-release.tar.gz
+
+      - name: Upload artifact (Windows)
+        if: startsWith(matrix.os, 'windows')
+        uses: actions/upload-artifact@v4
+        with:
+          name: fem_solver-windows-release
+          path: fem_solver-windows-release.zip

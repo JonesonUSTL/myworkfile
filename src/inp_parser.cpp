@@ -106,6 +106,7 @@ Model parseInpFile(const std::string& filePath) {
   std::string currentNset;
   std::string currentElset;
   std::string currentAmplitude;
+  std::string currentPartName;
   std::string currentLoadAmplitude;
   std::string plasticMode = "BILINEAR";
   ElementType currentElementType = ElementType::Truss2;
@@ -118,7 +119,20 @@ Model parseInpFile(const std::string& filePath) {
       const auto kw = parseKeyword(line);
       currentSection = kw.key;
 
-      if (kw.key == "*MATERIAL") {
+      if (kw.key == "*HEADING") {
+        // 下一行若为普通文本，作为模型名称。
+      } else if (kw.key == "*PART") {
+        currentPartName = kw.params.count("NAME") ? kw.params.at("NAME") : "PART-UNNAMED";
+        model.partNames.push_back(currentPartName);
+      } else if (kw.key == "*END PART") {
+        currentPartName.clear();
+      } else if (kw.key == "*OUTPUT") {
+        if (kw.params.count("FIELD") && kw.params.count("FREQUENCY")) {
+          model.step.fieldOutputFrequency = std::max(1, std::stoi(kw.params.at("FREQUENCY")));
+        }
+      } else if (kw.key == "*FIELD OUTPUT") {
+        if (kw.params.count("FREQUENCY")) model.step.fieldOutputFrequency = std::max(1, std::stoi(kw.params.at("FREQUENCY")));
+      } else if (kw.key == "*MATERIAL") {
         currentMaterial = kw.params.count("NAME") ? kw.params.at("NAME") : "MAT1";
         model.materials[currentMaterial].name = currentMaterial;
       } else if (kw.key == "*ELEMENT") {
@@ -137,6 +151,8 @@ Model parseInpFile(const std::string& filePath) {
         if (kw.params.count("AMPLITUDE")) model.step.amplitudeName = kw.params.at("AMPLITUDE");
       } else if (kw.key == "*PLASTIC") {
         plasticMode = kw.params.count("HARDENING") ? upper(kw.params.at("HARDENING")) : "BILINEAR";
+      } else if (kw.key == "*DENSITY" || kw.key == "*EXPANSION" || kw.key == "*CONDUCTIVITY" || kw.key == "*SPECIFIC HEAT") {
+        // 材料扩展参数在数据行读取。
       } else if (kw.key == "*AMPLITUDE") {
         currentAmplitude = kw.params.count("NAME") ? kw.params.at("NAME") : "AMP-1";
         model.amplitudes[currentAmplitude].name = currentAmplitude;
@@ -155,6 +171,8 @@ Model parseInpFile(const std::string& filePath) {
         if (kw.params.count("SURFACE")) c.surfaceName = kw.params.at("SURFACE");
         if (kw.params.count("PENALTY")) c.penalty = std::stod(kw.params.at("PENALTY"));
         model.couplings.push_back(c);
+      } else if (kw.key == "*MPC") {
+        // MPC 关键字本身仅切换解析状态，具体方程在随后的数据行读取。
       } else if (kw.key == "*NODE OUTPUT" || kw.key == "*ELEMENT OUTPUT") {
         OutputRequest req;
         req.kind = kw.key;
@@ -169,7 +187,9 @@ Model parseInpFile(const std::string& filePath) {
       continue;
     }
 
-    if (currentSection == "*NODE") {
+    if (currentSection == "*HEADING") {
+      if (model.modelName == "Model-1") model.modelName = line;
+    } else if (currentSection == "*NODE") {
       const auto p = splitCSV(line);
       if (p.size() < 4) throw std::runtime_error("NODE line requires id,x,y,z");
       model.nodes.push_back(Node{std::stoi(p[0]), {std::stod(p[1]), std::stod(p[2]), std::stod(p[3])}});
@@ -223,11 +243,40 @@ Model parseInpFile(const std::string& filePath) {
       m.law = MaterialLaw::LinearElastic;
     } else if (currentSection == "*PLASTIC") {
       auto p = splitCSV(line);
+      auto& m = model.materials[currentMaterial];
       if (p.size() >= 2) {
-        auto& m = model.materials[currentMaterial];
         m.yieldStress = std::stod(p[0]);
         m.hardening = std::stod(p[1]);
-        m.law = (plasticMode == "J2") ? MaterialLaw::J2Plasticity : MaterialLaw::BilinearElastoPlastic;
+      }
+      if (p.size() >= 1) {
+        const double stress = std::stod(p[0]);
+        const double peeq = (p.size() >= 2 ? std::stod(p[1]) : 0.0);
+        m.plasticTable.push_back({peeq, stress});
+      }
+      m.law = (plasticMode == "J2") ? MaterialLaw::J2Plasticity : MaterialLaw::BilinearElastoPlastic;
+    } else if (currentSection == "*DENSITY") {
+      auto p = splitCSV(line);
+      if (!p.empty()) model.materials[currentMaterial].density = std::stod(p[0]);
+    } else if (currentSection == "*EXPANSION") {
+      auto p = splitCSV(line);
+      if (!p.empty()) model.materials[currentMaterial].expansion = std::stod(p[0]);
+    } else if (currentSection == "*CONDUCTIVITY") {
+      auto p = splitCSV(line);
+      if (!p.empty()) model.materials[currentMaterial].conductivity = std::stod(p[0]);
+    } else if (currentSection == "*SPECIFIC HEAT") {
+      auto p = splitCSV(line);
+      if (!p.empty()) model.materials[currentMaterial].specificHeat = std::stod(p[0]);
+    } else if (currentSection == "*TEMPERATURE") {
+      auto p = splitCSV(line);
+      if (p.size() >= 2) {
+        if (isIntegerToken(p[0])) model.temperatureBCs.push_back({std::stoi(p[0]), "", std::stod(p[1])});
+        else model.temperatureBCs.push_back({0, p[0], std::stod(p[1])});
+      }
+    } else if (currentSection == "*DFLUX") {
+      auto p = splitCSV(line);
+      if (p.size() >= 2) {
+        if (isIntegerToken(p[0])) model.heatLoads.push_back({std::stoi(p[0]), "", std::stod(p.back())});
+        else model.heatLoads.push_back({0, p[0], std::stod(p.back())});
       }
     } else if (currentSection == "*BOUNDARY") {
       auto p = splitCSV(line);
@@ -276,6 +325,21 @@ Model parseInpFile(const std::string& filePath) {
         int d1 = std::stoi(p[0]), d2 = std::stoi(p[1]);
         for (int d = d1; d <= d2; ++d) model.couplings.back().dofs.push_back(d);
       }
+    } else if (currentSection == "*MPC") {
+      // 读取一条 MPC 关系：slave = coef*master + offset（当前实现单主点扩展格式）。
+      auto p = splitCSV(line);
+      if (p.size() >= 4) {
+        MpcConstraint m;
+        m.slaveNode = std::stoi(p[0]);
+        m.slaveDof = std::stoi(p[1]);
+        m.masterNodes.push_back(std::stoi(p[2]));
+        m.masterDofs.push_back(std::stoi(p[3]));
+        m.coefficients.push_back(p.size() >= 5 ? std::stod(p[4]) : 1.0);
+        if (p.size() >= 6) m.offset = std::stod(p[5]);
+        if (m.slaveDof >= 1 && m.slaveDof <= kDofPerNode && m.masterDofs[0] >= 1 && m.masterDofs[0] <= kDofPerNode) {
+          model.mpcs.push_back(m);
+        }
+      }
     } else if ((currentSection == "*NODE OUTPUT" || currentSection == "*ELEMENT OUTPUT") &&
                !model.outputRequests.empty()) {
       auto p = splitCSV(line);
@@ -284,18 +348,27 @@ Model parseInpFile(const std::string& filePath) {
     } else if (currentSection == "*STATIC") {
       auto p = splitCSV(line);
       if (!p.empty()) {
-        double initialInc = std::stod(p[0]);
-        if (initialInc > 0.0) model.step.increments = std::max(1, static_cast<int>(1.0 / initialInc));
-        if (p.size() >= 2 && model.step.useArcLength) {
-          model.step.arcLengthRadius = std::max(1e-12, std::stod(p[1]));
-        }
+        model.step.initialIncrement = std::max(1e-12, std::stod(p[0]));
+        model.step.increments = std::max(1, static_cast<int>(1.0 / model.step.initialIncrement));
+      }
+      if (p.size() >= 2) model.step.totalLoadFactor = std::max(1e-12, std::stod(p[1]));
+      if (p.size() >= 3) model.step.minIncrement = std::max(1e-12, std::stod(p[2]));
+      if (p.size() >= 4) model.step.maxIncrement = std::max(model.step.minIncrement, std::stod(p[3]));
+      if (model.step.useArcLength && p.size() >= 2) {
+        model.step.arcLengthRadius = std::max(1e-12, std::stod(p[1]));
       }
     } else if (currentSection == "*CONTROLS") {
+      // 扩展控制参数：Newton 迭代、容差、cutback、弧长半径调节参数。
       auto p = splitCSV(line);
       if (p.size() >= 2) {
         model.step.maxNewtonIters = std::stoi(p[0]);
         model.step.tolerance = std::stod(p[1]);
       }
+      if (p.size() >= 3) model.step.maxCutbacks = std::stoi(p[2]);
+      if (p.size() >= 4) model.step.arcLengthGrowFactor = std::stod(p[3]);
+      if (p.size() >= 5) model.step.arcLengthShrinkFactor = std::stod(p[4]);
+      if (p.size() >= 6) model.step.arcLengthMinRadius = std::stod(p[5]);
+      if (p.size() >= 7) model.step.arcLengthMaxRadius = std::stod(p[6]);
     }
   }
 
@@ -310,6 +383,12 @@ Model parseInpFile(const std::string& filePath) {
     if (e.material.empty()) e.material = model.materials.begin()->first;
     for (int nid : e.conn) {
       if (nodeIndex(model, nid) < 0) throw std::runtime_error("Element references missing node id");
+    }
+  }
+  for (const auto& m : model.mpcs) {
+    if (nodeIndex(model, m.slaveNode) < 0) throw std::runtime_error("MPC references missing slave node id");
+    for (int mn : m.masterNodes) {
+      if (nodeIndex(model, mn) < 0) throw std::runtime_error("MPC references missing master node id");
     }
   }
 
