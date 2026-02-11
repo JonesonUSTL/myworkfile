@@ -1,0 +1,23 @@
+*Heading
+** Truss with bilinear plastic material
+*Node
+1, 0, 0, 0
+2, 1, 0, 0
+*Material, name=STEEL_PLASTIC
+*Elastic
+2.0e11, 0.3
+*Plastic
+2.5e8, 1.0e9
+*Element, type=T3D2, elset=EALL
+1, 1, 2
+*Truss Section, elset=EALL, material=STEEL_PLASTIC
+1.0e-4
+*Boundary
+1, 1, 3, 0.0
+2, 2, 3, 0.0
+*Cload
+2, 1, 4.0e4
+*Step, name=plastic_linearized
+*Static
+1.0, 1.0
+*End Step

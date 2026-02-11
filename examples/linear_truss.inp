@@ -1,0 +1,24 @@
+*Heading
+** 2-bar planar truss in 3D DOF format
+*Node
+1, 0.0, 0.0, 0.0
+2, 1.0, 0.0, 0.0
+3, 0.5, 0.5, 0.0
+*Material, name=STEEL
+*Elastic
+2.1e11
+*Element, type=T3D2, elset=EALL
+1, 1, 3
+2, 2, 3
+*Truss Section, elset=EALL, material=STEEL
+1.0e-4
+*Boundary
+1, 1, 3, 0.0
+2, 1, 3, 0.0
+3, 3, 3, 0.0
+*Cload
+3, 2, -1.0e5
+*Step, name=LinearStep
+*Static
+1.0, 1.0
+*End Step

@@ -1,0 +1,46 @@
+*Heading
+** Demonstrates amplitude/coupling/contact/output parsing
+*Node
+1, 0,0,0
+2, 1,0,0
+3, 0,1,0
+4, 1,1,0
+5, 0,0,1
+6, 1,0,1
+7, 0,1,1
+8, 1,1,1
+*Nset, nset=TOP
+5,6,7,8
+*Nset, nset=BOTTOM
+1,2,3,4
+*Material, name=MATJ2
+*Elastic
+2.1e11, 0.3
+*Plastic, hardening=J2
+2.5e8, 2.0e9
+*Element, type=C3D8, elset=SOLID
+1,1,2,4,3,5,6,8,7
+*Elset, elset=SOLID
+1
+*Amplitude, name=RAMP
+0.0,0.0, 1.0,1.0
+*Boundary
+BOTTOM,1,6,0.0
+*Coupling, ref node=5
+*Kinematic
+1,6
+*Contact Pair, master=MASTER_SURF, slave=SLAVE_SURF, penalty=1.0e10, friction=0.25
+*Cload
+TOP,3,-2.0e5
+*Dsload
+SOLID,PZ,-1.0e4
+*Step, name=NL, amplitude=RAMP
+*Static, riks
+1.0,0.02
+*Controls
+30,1e-6
+*Node Output
+U, RF
+*Element Output
+S, E, MISES
+*End Step

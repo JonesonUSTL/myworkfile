@@ -1,0 +1,30 @@
+*Heading
+** Single C3D8 block under compression
+*Node
+1, 0, 0, 0
+2, 1, 0, 0
+3, 1, 1, 0
+4, 0, 1, 0
+5, 0, 0, 1
+6, 1, 0, 1
+7, 1, 1, 1
+8, 0, 1, 1
+*Material, name=STEEL
+*Elastic
+2.1e11, 0.3
+*Element, type=C3D8, elset=EALL
+1, 1,2,3,4,5,6,7,8
+*Boundary
+1,1,3,0
+2,1,3,0
+3,1,3,0
+4,1,3,0
+*Cload
+5,3,-1.0e6
+6,3,-1.0e6
+7,3,-1.0e6
+8,3,-1.0e6
+*Step, name=solid_linear
+*Static
+1.0,1.0
+*End Step
