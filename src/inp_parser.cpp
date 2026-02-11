@@ -156,7 +156,7 @@ Model parseInpFile(const std::string& filePath) {
         if (kw.params.count("PENALTY")) c.penalty = std::stod(kw.params.at("PENALTY"));
         model.couplings.push_back(c);
       } else if (kw.key == "*MPC") {
-        // 数据行在下方解析。
+        // MPC 关键字本身仅切换解析状态，具体方程在随后的数据行读取。
       } else if (kw.key == "*NODE OUTPUT" || kw.key == "*ELEMENT OUTPUT") {
         OutputRequest req;
         req.kind = kw.key;
@@ -279,6 +279,7 @@ Model parseInpFile(const std::string& filePath) {
         for (int d = d1; d <= d2; ++d) model.couplings.back().dofs.push_back(d);
       }
     } else if (currentSection == "*MPC") {
+      // 读取一条 MPC 关系：slave = coef*master + offset（当前实现单主点扩展格式）。
       auto p = splitCSV(line);
       if (p.size() >= 4) {
         MpcConstraint m;
@@ -307,6 +308,7 @@ Model parseInpFile(const std::string& filePath) {
         }
       }
     } else if (currentSection == "*CONTROLS") {
+      // 扩展控制参数：Newton 迭代、容差、cutback、弧长半径调节参数。
       auto p = splitCSV(line);
       if (p.size() >= 2) {
         model.step.maxNewtonIters = std::stoi(p[0]);

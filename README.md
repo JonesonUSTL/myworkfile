@@ -95,10 +95,18 @@ cmake --build build -j
 ### 4.3 运行示例
 
 ```bash
+./build/fem_solver --examples
 ./build/fem_solver examples/linear_truss.inp output/linear.vtk 1.0 dense
 ./build/fem_solver examples/nonlinear_truss.inp output/nonlinear.vtk 1.0 pcg
 ./build/fem_solver examples/c3d8_linear.inp output/c3d8_linear.vtk 1.0 eigen
 ./build/fem_solver examples/truss_plastic.inp output/truss_plastic.vtk 1.0 petsc
+./build/fem_solver examples/classic_bar_tension.inp output/classic_bar.vtk 1.0 dense
+```
+
+### 4.4 一键部署（macOS M4）
+
+```bash
+./scripts/deploy_macos_m4.sh
 ```
 
 ## 5) Windows 安装与使用（详细）
@@ -119,13 +127,26 @@ cmake --build build -j
 ### 5.3 运行
 
 ```bat
+build\fem_solver.exe --examples
 build\fem_solver.exe examples\linear_truss.inp output\linear.vtk 1.0 dense
 build\fem_solver.exe examples\advanced_keywords.inp output\advanced.vtk 1.0 pcg
+```
+
+### 5.4 一键部署（Windows）
+
+```powershell
+.\scripts\deploy_windows.ps1
+```
+或
+```bat
+scripts\deploy_windows.bat
 ```
 
 ## 6) 命令行
 
 ```bash
+fem_solver --help
+fem_solver --examples
 fem_solver <input.inp> <output.vtk> [deform_scale] [solver=dense|eigen|petsc|pcg]
 ```
 
@@ -144,3 +165,8 @@ fem_solver <input.inp> <output.vtk> [deform_scale] [solver=dense|eigen|petsc|pcg
 本轮新增：
 - `*Contact Pair` 支持 `friction=` 参数输入摩擦系数。
 - 非线性求解新增 cutback 机制（增量失败自动减步重算）。
+
+
+## 8) 详细中文帮助文档
+
+- `docs/user_guide_cn.md`：包含输入输出交互、案例、常见问题与部署说明。

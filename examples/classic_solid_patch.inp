@@ -1,0 +1,28 @@
+*Heading
+** 经典算例：单个 C3D8 体单元压缩（线性）
+*Node
+1,0,0,0
+2,1,0,0
+3,1,1,0
+4,0,1,0
+5,0,0,1
+6,1,0,1
+7,1,1,1
+8,0,1,1
+*Nset, nset=FIX
+1,2,3,4
+*Nset, nset=TOP
+5,6,7,8
+*Material, name=MAT1
+*Elastic
+2.0e11,0.3
+*Element, type=C3D8, elset=SOLID
+1,1,2,3,4,5,6,7,8
+*Boundary
+FIX,1,6,0.0
+*Cload
+TOP,3,-2.0e4
+*Step, name=SOLID_LINEAR
+*Static
+1.0
+*End Step

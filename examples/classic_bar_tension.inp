@@ -1,0 +1,21 @@
+*Heading
+** 经典算例：单杆受拉（线性）
+*Node
+1, 0,0,0
+2, 1,0,0
+*Material, name=STEEL
+*Elastic
+2.1e11, 0.3
+*Element, type=T3D2, elset=EALL
+1, 1,2
+*Truss Section, elset=EALL, material=STEEL
+1.0e-4
+*Boundary
+1,1,6,0.0
+2,2,6,0.0
+*Cload
+2,1,1.0e5
+*Step, name=BAR_LINEAR
+*Static
+1.0
+*End Step

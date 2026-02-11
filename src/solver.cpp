@@ -780,6 +780,7 @@ void applyCouplingPenalty(const Model& model, Matrix& K, std::vector<double>* fi
 
 
 // 施加接触罚函数（法向接触 + 库仑摩擦切向）。
+// 说明：此处采用 node-to-node 配对近似，显式写入残量与切线。
 void applyContactPenalty(const Model& model, Matrix& K, std::vector<double>* fint, const std::vector<double>* u) {
   for (const auto& c : model.contacts) {
     auto itM = model.nsets.find(c.masterSurface);
@@ -897,6 +898,7 @@ double amplitudeFactor(const Model& model, double lambda) {
 }
 
 // 显式组装约束方程（Coupling + MPC，Lagrange 乘子）：[K C^T; C 0]。
+// 每条约束统一表达为 sum(c_i * u_i) = rhs，便于后续继续扩展更复杂 MPC 形式。
 std::vector<double> solveWithMpcLagrange(const Model& model, const Matrix& K, const std::vector<double>& rhs,
                                          const std::vector<double>* uCurrent) {
   struct Cst {
@@ -991,6 +993,7 @@ Result solveLinear(const Model& model) {
   return r;
 }
 
+// 非线性静力主循环：包含 Newton 迭代、cutback 与弧长半径自适应。
 Result solveNonlinear(const Model& model) {
   const int ndof = static_cast<int>(model.nodes.size() * kDofPerNode);
   std::vector<double> u(ndof, 0.0), fext(ndof, 0.0);
