@@ -2,8 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
-#include <stdexcept>
 #include <numeric>
+#include <stdexcept>
+#include <unordered_map>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -22,8 +23,17 @@ namespace {
 using Matrix = std::vector<std::vector<double>>;
 
 int nodeIdx(const Model& model, int nodeId) {
-  for (size_t i = 0; i < model.nodes.size(); ++i)
-    if (model.nodes[i].id == nodeId) return static_cast<int>(i);
+  // 节点号查找是热点操作：使用缓存映射将查找复杂度从 O(N) 降到近似 O(1)。
+  static const Model* cachedModel = nullptr;
+  static std::unordered_map<int, int> idToIndex;
+  if (cachedModel != &model || idToIndex.size() != model.nodes.size()) {
+    idToIndex.clear();
+    idToIndex.reserve(model.nodes.size() * 2 + 1);
+    for (size_t i = 0; i < model.nodes.size(); ++i) idToIndex[model.nodes[i].id] = static_cast<int>(i);
+    cachedModel = &model;
+  }
+  auto it = idToIndex.find(nodeId);
+  if (it != idToIndex.end()) return it->second;
   throw std::runtime_error("Unknown node id");
 }
 
@@ -907,6 +917,7 @@ std::vector<double> solveWithMpcLagrange(const Model& model, const Matrix& K, co
     double rhs{0.0};
   };
   std::vector<Cst> csts;
+  csts.reserve(model.couplings.size() * 8 + model.mpcs.size());
 
   for (const auto& c : model.couplings) {
     if (c.referenceNode <= 0 || c.surfaceNodes.empty() || c.dofs.empty()) continue;
@@ -960,20 +971,28 @@ std::vector<double> solveWithMpcLagrange(const Model& model, const Matrix& K, co
 }
 
 
-Result solveLinear(const Model& model) {
-  const int ndof = static_cast<int>(model.nodes.size() * kDofPerNode);
-  Matrix K;
-  assemble(model, nullptr, K, nullptr);
 
+// 统一构造外载向量：节点载荷 + DLOAD/DSLOAD 等效节点力 + 幅值。
+std::vector<double> buildExternalLoad(const Model& model, double lambda) {
+  const int ndof = static_cast<int>(model.nodes.size() * kDofPerNode);
   std::vector<double> f(ndof, 0.0);
   for (const auto& l : model.loads) {
-    double amp = amplitudeByName(model, l.amplitudeName, 1.0);
+    const double amp = amplitudeByName(model, l.amplitudeName, lambda);
     for (int nid : expandNodes(model, l.nodeId, l.nodeSetName)) {
       int ni = nodeIdx(model, nid);
       f[ni * kDofPerNode + (l.dof - 1)] += l.value * amp;
     }
   }
-  applyBodyLoads(model, f, 1.0, 1.0);
+  applyBodyLoads(model, f, 1.0, lambda);
+  return f;
+}
+
+Result solveLinear(const Model& model) {
+  const int ndof = static_cast<int>(model.nodes.size() * kDofPerNode);
+  Matrix K;
+  assemble(model, nullptr, K, nullptr);
+
+  auto f = buildExternalLoad(model, 1.0);
 
   Matrix Kmod = K;
   std::vector<double> rhs = f;
@@ -996,14 +1015,7 @@ Result solveLinear(const Model& model) {
 // 非线性静力主循环：包含 Newton 迭代、cutback 与弧长半径自适应。
 Result solveNonlinear(const Model& model) {
   const int ndof = static_cast<int>(model.nodes.size() * kDofPerNode);
-  std::vector<double> u(ndof, 0.0), fext(ndof, 0.0);
-  for (const auto& l : model.loads) {
-    for (int nid : expandNodes(model, l.nodeId, l.nodeSetName)) {
-      int ni = nodeIdx(model, nid);
-      fext[ni * kDofPerNode + (l.dof - 1)] += l.value;
-    }
-  }
-  applyBodyLoads(model, fext, 1.0, 1.0);
+  std::vector<double> u(ndof, 0.0);
 
   Matrix K;
   std::vector<double> fint;
@@ -1016,15 +1028,7 @@ Result solveNonlinear(const Model& model) {
   while (lambdaPrev < model.step.totalLoadFactor - 1e-14) {
     double lambdaRaw = std::min(model.step.totalLoadFactor, lambdaPrev + dLambda);
     double lambda = amplitudeFactor(model, lambdaRaw);
-    std::vector<double> target(ndof, 0.0);
-    for (const auto& l : model.loads) {
-      double amp = amplitudeByName(model, l.amplitudeName, lambda);
-      for (int nid : expandNodes(model, l.nodeId, l.nodeSetName)) {
-        int ni = nodeIdx(model, nid);
-        target[ni * kDofPerNode + (l.dof - 1)] += l.value * amp;
-      }
-    }
-    applyBodyLoads(model, target, 1.0, lambda);
+    auto target = buildExternalLoad(model, lambda);
 
     bool converged = false;
     std::vector<double> uTrial = u;
@@ -1079,15 +1083,7 @@ Result solveNonlinear(const Model& model) {
   Result r;
   r.displacement = u;
   assemble(model, &u, K, &fint, &r.elementAxialForce, &r.elementStrain, &r.elementStress, &r.elementVonMises);
-  std::vector<double> ffinal(ndof, 0.0);
-  for (const auto& l : model.loads) {
-    double amp = amplitudeByName(model, l.amplitudeName, model.step.totalLoadFactor);
-    for (int nid : expandNodes(model, l.nodeId, l.nodeSetName)) {
-      int ni = nodeIdx(model, nid);
-      ffinal[ni * kDofPerNode + (l.dof - 1)] += l.value * amp;
-    }
-  }
-  applyBodyLoads(model, ffinal, 1.0, model.step.totalLoadFactor);
+  auto ffinal = buildExternalLoad(model, model.step.totalLoadFactor);
   r.reaction.assign(ndof, 0.0);
   for (int i = 0; i < ndof; ++i) r.reaction[i] = fint[i] - ffinal[i];
   return r;
