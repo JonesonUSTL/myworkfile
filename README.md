@@ -151,3 +151,28 @@ scripts\deploy_windows.bat
 3) **eigen/petsc 选了但不能用**
 - 需要 CMake 检测到对应依赖；否则只能使用 dense/pcg。
 
+
+
+
+## 19. Release 构建与 GitHub 发布
+
+### 19.1 本地 Release 打包（当前平台）
+
+```bash
+./scripts/package_release_local.sh
+```
+
+该脚本会输出：`fem_solver-<os>-<arch>-release.tar.gz`。
+
+### 19.2 GitHub 自动构建 macOS + Windows Release
+
+仓库已提供工作流：`.github/workflows/release-build.yml`
+
+触发方式：
+- 推送 tag（如 `v0.4.0`）
+- 或手动触发 `workflow_dispatch`
+
+工作流会在 `macos-14` 与 `windows-2022` 上构建 Release 并上传产物：
+- `fem_solver-macos-release.tar.gz`
+- `fem_solver-windows-release.zip`
+
