@@ -1,172 +1,153 @@
-# C++ 静力学有限元求解器（Abaqus inp -> VTK）
+# mini_fem_solver（Abaqus `.inp` -> VTK）
 
-本轮在上一版基础上继续增强，目标进一步逼近 Abaqus 静力学流程，并保持工程可持续迭代。
+一个面向教学与工程原型迭代的 C++ 静力学有限元求解器。目标是逐步对标 Abaqus 的非线性结构静力流程，并保持代码可读、可扩展、可跨平台部署。
 
-## 1) 已增强内容（本次）
+---
 
-- **并行机制引入**
-  - 新增 OpenMP 并行路径（矩阵向量乘、向量点积、并行 CG 迭代）。
-  - 新增求解后端：`pcg`（Parallel Conjugate Gradient）。
+## 1. 你能直接做什么
 
-- **载荷与边界表达增强**
-  - `*BOUNDARY` / `*CLOAD` 同时支持“节点号”与“节点集名称”。
-  - 新增 `*DSLOAD` 解析，并与 `*DLOAD` 统一进入体载荷容器。
-  - 在求解器中增加 `DLOAD/DSLOAD` 到等效节点力的近似转换（工程均分策略）。
+- 读取 Abaqus 风格 `.inp` 输入文件并求解。
+- 输出 VTK 文件，用 ParaView 直接查看变形与场变量。
+- 支持线性与非线性静力计算（Newton-Raphson + cutback + 弧长参数）。
+- 支持接触（法向 + 摩擦罚函数）、Coupling/Kinematic 和显式 MPC 约束。
+- 支持 macOS（含 Apple Silicon/M4）与 Windows 的一键部署脚本。
 
-- **Abaqus 关键字继续补全（解析层）**
-  - 继续支持并完善：`*Amplitude`、`*Coupling`、`*Kinematic`、`*Contact Pair`、`*Node Output`、`*Element Output`。
+---
 
-- **注释规范**
-  - 本轮新增与改动代码均使用中文注释，便于团队维护。
+## 2. 快速开始（5 分钟）
 
-## 2) 当前能力总览
-
-- 本轮实现升级：
-  - 接触算法升级为 3D 法向罚函数切线 + 库仑摩擦切向投影（残量/切线均显式装配）。
-  - 约束方程升级：`*Coupling/*Kinematic` 与 `*MPC` 统一进入 Lagrange 乘子增广方程。
-  - 弧长法参数扩展：支持半径增长/缩减因子、最小/最大半径与 cutback 联动。
-
-
-- 自由度：每节点 6 自由度（UX, UY, UZ, RX, RY, RZ）
-- 单元：
-  - `T3D2/T2D2`：2 节点桁架
-  - `B31/B33`：3D Euler-Bernoulli 梁（12 DOF）
-  - `S4/S4R`：Mindlin-Reissner 壳（简化 4 节点 24 DOF）
-  - `C3D8/C3D8R`：8 节点实体（中心点积分）
-- 材料：
-  - 线弹性
-  - 双线性弹塑性（杆类）
-  - J2 塑性（C3D8 单积分点 return-mapping）
-- 分析：线性与非线性静力（Newton-Raphson）
-- 线性求解后端：Dense / Eigen / PETSc(KSP) / ParallelCG(OpenMP)
-- 输出：VTK（位移、反力、轴力、应变、应力、von_mises）
-
-## 3) 关键字支持
-
-### 已支持
-
-- `*Node`
-- `*Element, type=...`
-- `*Nset`
-- `*Elset`
-- `*Material, name=...`
-- `*Elastic`
-- `*Plastic`
-- `*Truss Section`
-- `*Beam Section`
-- `*Shell Section`
-- `*Boundary`（节点号 / 节点集）
-- `*Cload`（节点号 / 节点集）
-- `*Dload`
-- `*Dsload`
-- `*Amplitude`
-- `*Step`（含 `nlgeom=YES` 与 `amplitude=...`）
-- `*Static`
-- `*Controls`
-- `*Coupling`
-- `*Kinematic`
-- `*Contact Pair`
-- `*Node Output`
-- `*Element Output`
-- `*End Step`
-
-### 当前说明
-
-- 接触、耦合、输出请求已完成解析与模型存储。
-- 接触/耦合完整残量与切线刚度（罚函数/拉格朗日乘子）可在现有模型层继续增强。
-
-## 4) macOS 安装与使用（详细）
-
-### 4.1 依赖安装
+### 2.1 构建
 
 ```bash
-brew install cmake eigen
-# 可选：PETSc
-brew install petsc
-```
-
-### 4.2 编译
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFEM_ENABLE_EIGEN=ON -DFEM_ENABLE_PETSC=ON -DFEM_ENABLE_OPENMP=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFEM_ENABLE_EIGEN=ON -DFEM_ENABLE_PETSC=OFF -DFEM_ENABLE_OPENMP=ON
 cmake --build build -j
 ```
 
-### 4.3 运行示例
+### 2.2 查看帮助/示例
 
 ```bash
+./build/fem_solver --help
 ./build/fem_solver --examples
-./build/fem_solver examples/linear_truss.inp output/linear.vtk 1.0 dense
-./build/fem_solver examples/nonlinear_truss.inp output/nonlinear.vtk 1.0 pcg
-./build/fem_solver examples/c3d8_linear.inp output/c3d8_linear.vtk 1.0 eigen
-./build/fem_solver examples/truss_plastic.inp output/truss_plastic.vtk 1.0 petsc
+./build/fem_solver --solvers
+```
+
+### 2.3 跑一个最小算例
+
+```bash
 ./build/fem_solver examples/classic_bar_tension.inp output/classic_bar.vtk 1.0 dense
 ```
 
-### 4.4 一键部署（macOS M4）
+---
+
+## 3. 命令行与交互
+
+```bash
+fem_solver <input.inp> <output.vtk> [deform_scale] [solver=dense|eigen|petsc|pcg]
+```
+
+### 3.1 功能命令
+
+- `--help`：打印完整帮助。
+- `--examples`：打印内置案例列表。
+- `--version`：打印程序版本。
+- `--solvers`：打印支持的线性求解器后端。
+- `--check-inp <input.inp>`：仅解析输入并给出模型统计（不求解）。
+
+### 3.2 典型用法
+
+```bash
+./build/fem_solver --check-inp examples/advanced_keywords.inp
+./build/fem_solver examples/linear_truss.inp output/linear.vtk 1.0 dense
+./build/fem_solver examples/nonlinear_truss.inp output/nonlinear.vtk 1.0 pcg
+```
+
+---
+
+## 4. 已支持能力
+
+### 4.1 单元与材料
+
+- 单元：`T3D2/T2D2`、`B31/B33`、`S4/S4R`、`C3D8/C3D8R`
+- 材料：线弹性、双线性弹塑性（杆类）、J2（实体）
+
+### 4.2 关键字
+
+- 网格：`*Node` `*Element` `*Nset` `*Elset`
+- 材料/截面：`*Material` `*Elastic` `*Plastic` `*Truss Section` `*Beam Section` `*Shell Section`
+- 载荷/边界：`*Boundary` `*Cload` `*Dload` `*Dsload` `*Amplitude`
+- 分析步：`*Step` `*Static` `*Controls`
+- 非线性增强：`*Static, riks`
+- 约束/接触：`*Coupling` `*Kinematic` `*MPC` `*Contact Pair`
+- 输出请求：`*Node Output` `*Element Output` `*End Step`
+
+### 4.3 求解策略
+
+- 线性：Dense / Eigen / PETSc / OpenMP PCG
+- 非线性：Newton-Raphson、cutback、弧长半径自适应参数
+- 约束：Lagrange 增广方程（Coupling + MPC）
+- 接触：法向罚函数 + 库仑摩擦切向投影
+
+---
+
+## 5. 经典案例与回归建议
+
+### 5.1 入门三件套（推荐每次改动后先跑）
+
+```bash
+./build/fem_solver examples/classic_bar_tension.inp output/classic_bar.vtk 1.0 dense
+./build/fem_solver examples/classic_beam_tip_load.inp output/classic_beam.vtk 1.0 dense
+./build/fem_solver examples/classic_solid_patch.inp output/classic_solid.vtk 1.0 dense
+```
+
+### 5.2 扩展关键字验证
+
+```bash
+./build/fem_solver --check-inp examples/advanced_keywords.inp
+```
+
+---
+
+## 6. 部署（可执行）
+
+### 6.1 macOS（Apple Silicon / M4）
 
 ```bash
 ./scripts/deploy_macos_m4.sh
 ```
 
-## 5) Windows 安装与使用（详细）
+脚本会自动完成：平台检查、依赖安装（brew）、编译与冒烟测试。
 
-### 5.1 推荐环境
-
-- Visual Studio 2022（C++ 工作负载）
-- CMake
-- 可选：Eigen（vcpkg）、PETSc（MSYS2/自编译）
-
-### 5.2 编译
-
-```bat
-cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DFEM_ENABLE_EIGEN=ON -DFEM_ENABLE_PETSC=OFF -DFEM_ENABLE_OPENMP=ON
-cmake --build build -j
-```
-
-### 5.3 运行
-
-```bat
-build\fem_solver.exe --examples
-build\fem_solver.exe examples\linear_truss.inp output\linear.vtk 1.0 dense
-build\fem_solver.exe examples\advanced_keywords.inp output\advanced.vtk 1.0 pcg
-```
-
-### 5.4 一键部署（Windows）
+### 6.2 Windows（PowerShell）
 
 ```powershell
 .\scripts\deploy_windows.ps1
 ```
-或
+
+### 6.3 Windows（CMD）
+
 ```bat
 scripts\deploy_windows.bat
 ```
 
-## 6) 命令行
+---
 
-```bash
-fem_solver --help
-fem_solver --examples
-fem_solver <input.inp> <output.vtk> [deform_scale] [solver=dense|eigen|petsc|pcg]
-```
+## 7. 文档导航
 
-## 7) 说明与后续建议
+- `docs/user_guide_cn.md`：用户使用帮助（命令、案例、FAQ）
+- `docs/theory_manual_cn.md`：理论手册（离散方程、非线性、接触、约束、弧长）
+- `docs/developer_manual_cn.md`：开发文档（架构、数据流、扩展点、调试建议）
+- `docs/abaqus_static_alignment_plan.md`：后续对标 Abaqus 的分阶段路线图
 
-- 该版本已具备“并行 + 多单元 + 非线性 + 更完整 inp 解析”的可运行骨架。
-- 若要进一步对标 Abaqus 静力学，建议下一步优先实现：
-  1. 接触残量/切线刚度（法向接触 + 摩擦）
-  2. 耦合约束方程显式组装（MPC/Lagrange）
-  3. 壳与实体的多积分点与 hourglass 控制
-  4. 非线性步自适应弧长法（支持 cutback + RIKS 风格半径调节）
+---
 
+## 8. 常见问题（简版）
 
-- 已新增详细实施路线图：`docs/abaqus_static_alignment_plan.md`（按 P0~P3 拆解接触、MPC/Lagrange、多积分点/hourglass、弧长法）。
+1) **Singular matrix**
+- 通常是约束不足（刚体自由度未被抑制）。
 
-本轮新增：
-- `*Contact Pair` 支持 `friction=` 参数输入摩擦系数。
-- 非线性求解新增 cutback 机制（增量失败自动减步重算）。
+2) **非线性不收敛**
+- 适当降低初始增量、增加 `*Controls` 迭代上限、调整接触罚系数与弧长参数。
 
+3) **eigen/petsc 选了但不能用**
+- 需要 CMake 检测到对应依赖；否则只能使用 dense/pcg。
 
-## 8) 详细中文帮助文档
-
-- `docs/user_guide_cn.md`：包含输入输出交互、案例、常见问题与部署说明。
