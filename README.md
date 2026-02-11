@@ -21,6 +21,12 @@
 
 ## 2) 当前能力总览
 
+- 本轮实现升级：
+  - 接触算法升级为 3D 法向罚函数切线 + 库仑摩擦切向投影（残量/切线均显式装配）。
+  - 约束方程升级：`*Coupling/*Kinematic` 与 `*MPC` 统一进入 Lagrange 乘子增广方程。
+  - 弧长法参数扩展：支持半径增长/缩减因子、最小/最大半径与 cutback 联动。
+
+
 - 自由度：每节点 6 自由度（UX, UY, UZ, RX, RY, RZ）
 - 单元：
   - `T3D2/T2D2`：2 节点桁架
@@ -131,6 +137,9 @@ fem_solver <input.inp> <output.vtk> [deform_scale] [solver=dense|eigen|petsc|pcg
   2. 耦合约束方程显式组装（MPC/Lagrange）
   3. 壳与实体的多积分点与 hourglass 控制
   4. 非线性步自适应弧长法（支持 cutback + RIKS 风格半径调节）
+
+
+- 已新增详细实施路线图：`docs/abaqus_static_alignment_plan.md`（按 P0~P3 拆解接触、MPC/Lagrange、多积分点/hourglass、弧长法）。
 
 本轮新增：
 - `*Contact Pair` 支持 `friction=` 参数输入摩擦系数。

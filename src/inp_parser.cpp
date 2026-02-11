@@ -155,6 +155,8 @@ Model parseInpFile(const std::string& filePath) {
         if (kw.params.count("SURFACE")) c.surfaceName = kw.params.at("SURFACE");
         if (kw.params.count("PENALTY")) c.penalty = std::stod(kw.params.at("PENALTY"));
         model.couplings.push_back(c);
+      } else if (kw.key == "*MPC") {
+        // 数据行在下方解析。
       } else if (kw.key == "*NODE OUTPUT" || kw.key == "*ELEMENT OUTPUT") {
         OutputRequest req;
         req.kind = kw.key;
@@ -276,6 +278,20 @@ Model parseInpFile(const std::string& filePath) {
         int d1 = std::stoi(p[0]), d2 = std::stoi(p[1]);
         for (int d = d1; d <= d2; ++d) model.couplings.back().dofs.push_back(d);
       }
+    } else if (currentSection == "*MPC") {
+      auto p = splitCSV(line);
+      if (p.size() >= 4) {
+        MpcConstraint m;
+        m.slaveNode = std::stoi(p[0]);
+        m.slaveDof = std::stoi(p[1]);
+        m.masterNodes.push_back(std::stoi(p[2]));
+        m.masterDofs.push_back(std::stoi(p[3]));
+        m.coefficients.push_back(p.size() >= 5 ? std::stod(p[4]) : 1.0);
+        if (p.size() >= 6) m.offset = std::stod(p[5]);
+        if (m.slaveDof >= 1 && m.slaveDof <= kDofPerNode && m.masterDofs[0] >= 1 && m.masterDofs[0] <= kDofPerNode) {
+          model.mpcs.push_back(m);
+        }
+      }
     } else if ((currentSection == "*NODE OUTPUT" || currentSection == "*ELEMENT OUTPUT") &&
                !model.outputRequests.empty()) {
       auto p = splitCSV(line);
@@ -296,6 +312,11 @@ Model parseInpFile(const std::string& filePath) {
         model.step.maxNewtonIters = std::stoi(p[0]);
         model.step.tolerance = std::stod(p[1]);
       }
+      if (p.size() >= 3) model.step.maxCutbacks = std::stoi(p[2]);
+      if (p.size() >= 4) model.step.arcLengthGrowFactor = std::stod(p[3]);
+      if (p.size() >= 5) model.step.arcLengthShrinkFactor = std::stod(p[4]);
+      if (p.size() >= 6) model.step.arcLengthMinRadius = std::stod(p[5]);
+      if (p.size() >= 7) model.step.arcLengthMaxRadius = std::stod(p[6]);
     }
   }
 
@@ -310,6 +331,12 @@ Model parseInpFile(const std::string& filePath) {
     if (e.material.empty()) e.material = model.materials.begin()->first;
     for (int nid : e.conn) {
       if (nodeIndex(model, nid) < 0) throw std::runtime_error("Element references missing node id");
+    }
+  }
+  for (const auto& m : model.mpcs) {
+    if (nodeIndex(model, m.slaveNode) < 0) throw std::runtime_error("MPC references missing slave node id");
+    for (int mn : m.masterNodes) {
+      if (nodeIndex(model, mn) < 0) throw std::runtime_error("MPC references missing master node id");
     }
   }
 

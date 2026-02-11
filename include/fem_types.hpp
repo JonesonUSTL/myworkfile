@@ -96,12 +96,23 @@ struct Coupling {
   double penalty{1e10};
 };
 
-// 接触对（当前保存解析结果，后续可扩展到接触残量和切线刚度）。
+// 接触对（法向 + 摩擦罚函数参数）。
 struct ContactPair {
   std::string masterSurface;
   std::string slaveSurface;
   double penalty{1e9};
   double friction{0.3};
+};
+
+
+// 多点约束方程（MPC）：slaveDof = sum(coeff_i * masterDof_i) + offset。
+struct MpcConstraint {
+  int slaveNode{};
+  int slaveDof{};
+  std::vector<int> masterNodes;
+  std::vector<int> masterDofs;
+  std::vector<double> coefficients;
+  double offset{0.0};
 };
 
 // 输出请求（当前保存关键字，便于后续做选择性输出）。
@@ -124,6 +135,10 @@ struct Step {
   std::string amplitudeName;
   bool useArcLength{false};
   double arcLengthRadius{1e-2};
+  double arcLengthMinRadius{1e-5};
+  double arcLengthMaxRadius{5e-2};
+  double arcLengthGrowFactor{1.25};
+  double arcLengthShrinkFactor{0.5};
 };
 
 // 有限元模型容器。
@@ -136,6 +151,7 @@ struct Model {
   std::unordered_map<std::string, Amplitude> amplitudes;
   std::vector<Coupling> couplings;
   std::vector<ContactPair> contacts;
+  std::vector<MpcConstraint> mpcs;
   std::vector<OutputRequest> outputRequests;
   std::vector<DofBC> bcs;
   std::vector<NodalLoad> loads;

@@ -788,51 +788,71 @@ void applyContactPenalty(const Model& model, Matrix& K, std::vector<double>* fin
     const auto& master = itM->second;
     const auto& slave = itS->second;
     const size_t np = std::min(master.size(), slave.size());
+    const double kn = std::max(1e3, c.penalty);
     for (size_t i = 0; i < np; ++i) {
       int im = nodeIdx(model, master[i]);
       int is = nodeIdx(model, slave[i]);
-      int md = im * kDofPerNode + 2;
-      int sd = is * kDofPerNode + 2;
-      double g = 0.0;
-      if (u) g = (*u)[sd] - (*u)[md];
-      if (g > 0.0) continue;  // 仅在压入时激活
-      double kpen = c.penalty;
-      K[sd][sd] += kpen;
-      K[md][md] += kpen;
-      K[sd][md] -= kpen;
-      K[md][sd] -= kpen;
+      const auto& xm = model.nodes[im].x;
+      const auto& xs = model.nodes[is].x;
+
+      std::array<double, 3> n = {xs[0] - xm[0], xs[1] - xm[1], xs[2] - xm[2]};
+      double L = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+      if (L < 1e-14) continue;
+      n = {n[0] / L, n[1] / L, n[2] / L};
+
+      std::array<double, 3> du{0.0, 0.0, 0.0};
+      if (u) for (int d = 0; d < 3; ++d) du[d] = (*u)[is * kDofPerNode + d] - (*u)[im * kDofPerNode + d];
+      double gap = du[0] * n[0] + du[1] * n[1] + du[2] * n[2];
+      if (gap >= 0.0) continue;
+
+      std::array<int, 6> map = {is * kDofPerNode + 0, is * kDofPerNode + 1, is * kDofPerNode + 2,
+                                im * kDofPerNode + 0, im * kDofPerNode + 1, im * kDofPerNode + 2};
+      for (int a = 0; a < 3; ++a) {
+        for (int b = 0; b < 3; ++b) {
+          double kab = kn * n[a] * n[b];
+          K[map[a]][map[b]] += kab;
+          K[map[a + 3]][map[b + 3]] += kab;
+          K[map[a]][map[b + 3]] -= kab;
+          K[map[a + 3]][map[b]] -= kab;
+        }
+      }
       if (fint && u) {
-        (*fint)[sd] += kpen * g;
-        (*fint)[md] -= kpen * g;
+        double pn = kn * gap;
+        for (int a = 0; a < 3; ++a) {
+          (*fint)[map[a]] += pn * n[a];
+          (*fint)[map[a + 3]] -= pn * n[a];
+        }
       }
 
-      // 切向摩擦：使用库仑上限构造切向罚刚度。
-      const double mu = c.friction;
-      const double fn = std::max(0.0, -kpen * g);
-      int mtx = im * kDofPerNode + 0, stx = is * kDofPerNode + 0;
-      int mty = im * kDofPerNode + 1, sty = is * kDofPerNode + 1;
-      double slipx = 0.0, slipy = 0.0;
-      if (u) {
-        slipx = (*u)[stx] - (*u)[mtx];
-        slipy = (*u)[sty] - (*u)[mty];
+      double fn = std::max(0.0, -kn * gap);
+      if (fn <= 0.0 || c.friction <= 0.0) continue;
+      std::array<double, 3> ut = {du[0] - gap * n[0], du[1] - gap * n[1], du[2] - gap * n[2]};
+      double slip = std::sqrt(ut[0] * ut[0] + ut[1] * ut[1] + ut[2] * ut[2]);
+      double ktTrial = kn * 0.2;
+      double tTrial = ktTrial * slip;
+      double kt = (tTrial <= c.friction * fn) ? ktTrial : (c.friction * fn / (slip + 1e-12));
+
+      for (int a = 0; a < 3; ++a) {
+        for (int b = 0; b < 3; ++b) {
+          double Pab = ((a == b) ? 1.0 : 0.0) - n[a] * n[b];
+          double kab = kt * Pab;
+          K[map[a]][map[b]] += kab;
+          K[map[a + 3]][map[b + 3]] += kab;
+          K[map[a]][map[b + 3]] -= kab;
+          K[map[a + 3]][map[b]] -= kab;
+        }
       }
-      double slip = std::sqrt(slipx * slipx + slipy * slipy);
-      // 粘滑判据：若切向试算力超过库仑极限，则进入滑移并降低切向刚度。
-      double kTrial = kpen * 0.2;
-      double tTrial = kTrial * slip;
-      double kt = (tTrial > mu * fn) ? (mu * fn / (slip + 1e-9)) : kTrial;
-      if (kt > 0.0) {
-        K[stx][stx] += kt; K[mtx][mtx] += kt; K[stx][mtx] -= kt; K[mtx][stx] -= kt;
-        K[sty][sty] += kt; K[mty][mty] += kt; K[sty][mty] -= kt; K[mty][sty] -= kt;
-        if (fint && u) {
-          (*fint)[stx] += kt * slipx; (*fint)[mtx] -= kt * slipx;
-          (*fint)[sty] += kt * slipy; (*fint)[mty] -= kt * slipy;
+      if (fint && u) {
+        for (int a = 0; a < 3; ++a) {
+          double ta = kt * ut[a];
+          (*fint)[map[a]] += ta;
+          (*fint)[map[a + 3]] -= ta;
         }
       }
     }
   }
-
 }
+
 
 
 void applyBodyLoads(const Model& model, std::vector<double>& f, double scale, double lambda) {
@@ -876,11 +896,16 @@ double amplitudeFactor(const Model& model, double lambda) {
   return lambda;
 }
 
-// 显式组装耦合约束方程（Lagrange 乘子）：[K C^T; C 0]。
+// 显式组装约束方程（Coupling + MPC，Lagrange 乘子）：[K C^T; C 0]。
 std::vector<double> solveWithMpcLagrange(const Model& model, const Matrix& K, const std::vector<double>& rhs,
                                          const std::vector<double>* uCurrent) {
-  struct Cst { int s; int r; };
+  struct Cst {
+    std::vector<int> dofs;
+    std::vector<double> coeffs;
+    double rhs{0.0};
+  };
   std::vector<Cst> csts;
+
   for (const auto& c : model.couplings) {
     if (c.referenceNode <= 0 || c.surfaceNodes.empty() || c.dofs.empty()) continue;
     int ir = nodeIdx(model, c.referenceNode);
@@ -888,9 +913,22 @@ std::vector<double> solveWithMpcLagrange(const Model& model, const Matrix& K, co
       int is = nodeIdx(model, sid);
       for (int d : c.dofs) {
         if (d < 1 || d > kDofPerNode) continue;
-        csts.push_back({is * kDofPerNode + (d - 1), ir * kDofPerNode + (d - 1)});
+        csts.push_back({{is * kDofPerNode + (d - 1), ir * kDofPerNode + (d - 1)}, {1.0, -1.0}, 0.0});
       }
     }
+  }
+  for (const auto& m : model.mpcs) {
+    if (m.slaveDof < 1 || m.slaveDof > kDofPerNode) continue;
+    Cst c;
+    c.dofs.push_back(nodeIdx(model, m.slaveNode) * kDofPerNode + (m.slaveDof - 1));
+    c.coeffs.push_back(1.0);
+    for (size_t i = 0; i < m.masterNodes.size() && i < m.masterDofs.size() && i < m.coefficients.size(); ++i) {
+      if (m.masterDofs[i] < 1 || m.masterDofs[i] > kDofPerNode) continue;
+      c.dofs.push_back(nodeIdx(model, m.masterNodes[i]) * kDofPerNode + (m.masterDofs[i] - 1));
+      c.coeffs.push_back(-m.coefficients[i]);
+    }
+    c.rhs = m.offset;
+    csts.push_back(c);
   }
   if (csts.empty()) return solveLinearSystem(model, K, rhs);
 
@@ -903,11 +941,14 @@ std::vector<double> solveWithMpcLagrange(const Model& model, const Matrix& K, co
     b[i] = rhs[i];
   }
   for (int k = 0; k < m; ++k) {
-    int s = csts[k].s, r = csts[k].r;
-    A[n + k][s] = 1.0; A[n + k][r] = -1.0;
-    A[s][n + k] = 1.0; A[r][n + k] = -1.0;
-    double g = 0.0;
-    if (uCurrent) g = (*uCurrent)[s] - (*uCurrent)[r];
+    for (size_t i = 0; i < csts[k].dofs.size(); ++i) {
+      int dof = csts[k].dofs[i];
+      double c = csts[k].coeffs[i];
+      A[n + k][dof] = c;
+      A[dof][n + k] = c;
+    }
+    double g = -csts[k].rhs;
+    if (uCurrent) for (size_t i = 0; i < csts[k].dofs.size(); ++i) g += csts[k].coeffs[i] * (*uCurrent)[csts[k].dofs[i]];
     b[n + k] = -g;
   }
   regularize(A);
@@ -915,6 +956,7 @@ std::vector<double> solveWithMpcLagrange(const Model& model, const Matrix& K, co
   sol.resize(n);
   return sol;
 }
+
 
 Result solveLinear(const Model& model) {
   const int ndof = static_cast<int>(model.nodes.size() * kDofPerNode);
@@ -966,6 +1008,7 @@ Result solveNonlinear(const Model& model) {
 
   double lambdaPrev = 0.0;
   double dLambda = model.step.totalLoadFactor / std::max(1, model.step.increments);
+  double arcRadius = model.step.arcLengthRadius;
   int cutbackCount = 0;
   while (lambdaPrev < model.step.totalLoadFactor - 1e-14) {
     double lambdaRaw = std::min(model.step.totalLoadFactor, lambdaPrev + dLambda);
@@ -982,6 +1025,7 @@ Result solveNonlinear(const Model& model) {
 
     bool converged = false;
     std::vector<double> uTrial = u;
+    double dLamAcc = 0.0;
     for (int it = 0; it < model.step.maxNewtonIters; ++it) {
       assemble(model, &uTrial, K, &fint);
       std::vector<double> res(ndof, 0.0);
@@ -994,23 +1038,25 @@ Result solveNonlinear(const Model& model) {
         if (!fixed[i]) norm += res[i] * res[i];
       if (std::sqrt(norm) < model.step.tolerance) {
         converged = true;
-        if (it <= 3) dLambda = std::min(dLambda * 1.2, model.step.totalLoadFactor * 0.25);
-        if (it > 10) dLambda = std::max(dLambda * 0.5, model.step.totalLoadFactor * 1e-4);
+        if (model.step.useArcLength) {
+          if (it <= 4) arcRadius = std::min(model.step.arcLengthMaxRadius, arcRadius * model.step.arcLengthGrowFactor);
+          if (it > 10) arcRadius = std::max(model.step.arcLengthMinRadius, arcRadius * model.step.arcLengthShrinkFactor);
+          dLambda = std::max(model.step.totalLoadFactor * 1e-6, std::abs(dLamAcc));
+        } else {
+          if (it <= 3) dLambda = std::min(dLambda * 1.2, model.step.totalLoadFactor * 0.25);
+          if (it > 10) dLambda = std::max(dLambda * 0.5, model.step.totalLoadFactor * 1e-4);
+        }
         break;
       }
 
       regularize(Kmod);
       auto du = solveWithMpcLagrange(model, Kmod, res, &uTrial);
-      double duNorm = 0.0;
-      for (int i = 0; i < ndof; ++i) {
-        uTrial[i] += du[i];
-        duNorm += du[i] * du[i];
-      }
-      duNorm = std::sqrt(duNorm);
+      double duNorm = std::sqrt(dotVec(du, du));
       if (model.step.useArcLength) {
-        double ratio = model.step.arcLengthRadius / (duNorm + 1e-12);
-        dLambda *= std::clamp(ratio, 0.5, 1.5);
+        double ratio = arcRadius / (duNorm + 1e-12);
+        dLamAcc += std::clamp(dLambda * ratio, -1.5 * std::abs(dLambda), 1.5 * std::abs(dLambda));
       }
+      for (int i = 0; i < ndof; ++i) uTrial[i] += du[i];
     }
 
     if (converged) {
@@ -1018,7 +1064,8 @@ Result solveNonlinear(const Model& model) {
       lambdaPrev = lambdaRaw;
       cutbackCount = 0;
     } else {
-      dLambda *= 0.5;
+      dLambda *= model.step.useArcLength ? model.step.arcLengthShrinkFactor : 0.5;
+      arcRadius = std::max(model.step.arcLengthMinRadius, arcRadius * model.step.arcLengthShrinkFactor);
       ++cutbackCount;
       if (cutbackCount > model.step.maxCutbacks || dLambda < model.step.totalLoadFactor * 1e-6) {
         throw std::runtime_error("Newton iteration did not converge after cutbacks");
@@ -1042,6 +1089,7 @@ Result solveNonlinear(const Model& model) {
   for (int i = 0; i < ndof; ++i) r.reaction[i] = fint[i] - ffinal[i];
   return r;
 }
+
 
 }  // namespace
 
